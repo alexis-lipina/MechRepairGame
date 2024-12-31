@@ -21,6 +21,7 @@ struct FAsyncReadRTData
 	TArray<FLinearColor> PixelColors;
 };
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCoverageCompleteDelegate, int, ChannelIndex);
 
 /// <summary>
 /// This component handles functionality for objects in the game which can be painted, washed, or otherwise have their surfaces altered by a tool.
@@ -49,20 +50,29 @@ public:
 
 	// 0...1 value for how "complete" the paint job on this render target is
 	UPROPERTY(BlueprintReadOnly)
-	float NormalizedCompletion = 0.0f;
+	FVector NormalizedCompletion = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	bool bUsesAutocomplete = true;
 
 	// Used to kick-off a read (maybe mark an active read as dirty later?)
 	UFUNCTION(BlueprintCallable)
 	void AsyncReadPaint(UTextureRenderTarget2D* TextureRenderTarget, bool bFlushRHI);
+
+	// Uses index of array as channel index (0=r, 1=g, 2=b, 3=a)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	TArray<bool> bIsChannelCoverageComplete;
+
+	UPROPERTY(BlueprintAssignable)
+	FOnCoverageCompleteDelegate OnCoverageComplete;
+
+	// 0...1 %age of "true coverage" necessary to flush the channel and call it done, to prevent ppl from needing to pixel-hunt for dirt
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ClampMin = 0, ClampMax = 1))
+	float CompletenessThreshold = 0.95f;
 
 	TSharedPtr<FAsyncReadRTData, ESPMode::ThreadSafe> ReadRTData;
 
 protected:
 	bool bShouldRefresh = false;
 	uint64 StartFrame;
-	// used to poll the thread data
-	UFUNCTION()
-	void OnNextFrame();
-	// Calcuoated at startup, the required %age of the render target texture that must be filled in for the piece to be called "done" (since UV islands will not cover the entire texture)
-	//float CompletionPercentCoverage = 0.0f;
 };

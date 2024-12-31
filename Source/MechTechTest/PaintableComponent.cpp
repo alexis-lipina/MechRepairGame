@@ -18,11 +18,8 @@ UE_DISABLE_OPTIMIZATION
 // Sets default values for this component's properties
 UPaintableComponent::UPaintableComponent()
 {
-	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-	// off to improve performance if you don't need them.
 	PrimaryComponentTick.bCanEverTick = true;
-
-	// ...
+	bIsChannelCoverageComplete = {false, false, false};
 }
 
 
@@ -30,9 +27,6 @@ UPaintableComponent::UPaintableComponent()
 void UPaintableComponent::BeginPlay()
 {
 	Super::BeginPlay();
-
-	// ...
-	
 }
 
 // this should eventually do things like cache total coverage of the mesh UVs in texture space so future percentage calculations arent just percentages of texture but percentage of UV
@@ -95,7 +89,9 @@ static void PollRTRead(FRHICommandListImmediate& RHICmdList,
 
 			ReadData->PixelColors.Empty(Width * Height);
 
-			float PercentCompletion = 0.0f;
+			float PercentCompletion_R = 0.0f;
+			float PercentCompletion_G = 0.0f;
+			float PercentCompletion_B = 0.0f;
 			float PercentCoverage = 0.0f; // how much of the render target actually is used by the mesh, essentially. Using Alpha channel.
 
 			const EPixelFormat Format = ReadData->Texture->GetFormat();
@@ -130,13 +126,26 @@ static void PollRTRead(FRHICommandListImmediate& RHICmdList,
 					default:
 						UE_LOG(LogTemp, Warning, TEXT("UAsyncReadRTAction: Unsupported RT format! Format: %d"), static_cast<int32>(Format)); // Unsupported, add a new switch statement.
 					}
-					PercentCompletion += OutColor.G / (Width * Height);  // gets the average by adding each pixels value / total number of pixels
+					PercentCompletion_R += OutColor.R / (Width * Height);  // gets the average by adding each pixels value / total number of pixels
+					PercentCompletion_G += OutColor.G / (Width * Height);  // gets the average by adding each pixels value / total number of pixels
+					PercentCompletion_B += OutColor.B / (Width * Height);  // gets the average by adding each pixels value / total number of pixels
 					PercentCoverage += (1.0f - OutColor.A) / (Width * Height);  // gets the average by adding each pixels value / total number of pixels
 				}
 			}
 			RHICmdList.UnmapStagingSurface(ReadData->Texture);
 			ReadData->FinishedRead = true;
-			PaintableComponent->NormalizedCompletion = PercentCompletion / PercentCoverage;
+			PaintableComponent->NormalizedCompletion = FVector(PercentCompletion_R, PercentCompletion_G, PercentCompletion_B) / PercentCoverage;
+			for (int i = 0; i < 3; i++)
+			{
+				if (PaintableComponent->NormalizedCompletion[i] > PaintableComponent->CompletenessThreshold && !PaintableComponent->bIsChannelCoverageComplete[i])
+				{
+					PaintableComponent->bIsChannelCoverageComplete[i] = true;
+					AsyncTask(ENamedThreads::GameThread, [PaintableComponent, i]()
+						{
+							PaintableComponent->OnCoverageComplete.Broadcast(i);
+						});
+				}
+			}
 			ReadData->CurrentlyPolling = false;
 			ReadData->CurrentlyReading = false;
 			//UE_LOG(LogTemp, Warning, TEXT("PollRTRead() completed successfully! Texture processed"));
@@ -148,6 +157,10 @@ static void PollRTRead(FRHICommandListImmediate& RHICmdList,
 void UPaintableComponent::AsyncReadPaint(UTextureRenderTarget2D* TextureRenderTarget, bool bFlushRHI)
 {
 	if (ReadRTData->CurrentlyReading)
+	{
+		return;
+	}
+	if (!bUsesAutocomplete)
 	{
 		return;
 	}
@@ -239,6 +252,10 @@ void UPaintableComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	{
 		return;
 	}
+	if (!bUsesAutocomplete)
+	{
+		return;
+	}
 
 	if (!ReadRTData->CurrentlyPolling)
 	{
@@ -253,7 +270,7 @@ void UPaintableComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 //			});
 	}
 }
-
+/*
 void UPaintableComponent::OnNextFrame()
 {
 	//const int32 FramesWaited = GFrameCounter - StartFrame;
@@ -279,6 +296,6 @@ void UPaintableComponent::OnNextFrame()
 
 		GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UPaintableComponent::OnNextFrame); // pretty sure this +1s the number of calls to OnNextFrame
 	}
-}
+}*/
 
 UE_ENABLE_OPTIMIZATION
